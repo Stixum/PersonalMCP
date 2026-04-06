@@ -31,7 +31,7 @@ PORTFOLIO_FILES = [
 
 # transport_security=None: DNS-rebinding protection is unnecessary for a Lambda
 # deployment (no direct localhost exposure); disabling avoids 421 on non-localhost hosts.
-from mcp.server.fastmcp.server import TransportSecuritySettings as _TSS
+from mcp.server.transport_security import TransportSecuritySettings as _TSS
 
 mcp = FastMCP("personal-context", stateless_http=True, transport_security=_TSS(
     enable_dns_rebinding_protection=False,
@@ -42,7 +42,7 @@ s3_client = boto3.client("s3")
 def _register_resource(name: str) -> None:
     """Register one portfolio file as an MCP resource. Factory avoids closure bug."""
 
-    @mcp.resource(f"context://{name}")
+    @mcp.resource(f"context://{name}", name=name)
     def _get() -> str:
         bucket = os.environ["S3_BUCKET"]
         response = s3_client.get_object(Bucket=bucket, Key=f"{name}.md")
