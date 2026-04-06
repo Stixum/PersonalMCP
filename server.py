@@ -13,6 +13,7 @@ Environment variables required:
 import os
 import boto3
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from auth import BearerAuthMiddleware
 
@@ -29,11 +30,9 @@ PORTFOLIO_FILES = [
     "decision-log",
 ]
 
-# transport_security=None: DNS-rebinding protection is unnecessary for a Lambda
-# deployment (no direct localhost exposure); disabling avoids 421 on non-localhost hosts.
-from mcp.server.transport_security import TransportSecuritySettings as _TSS
-
-mcp = FastMCP("personal-context", stateless_http=True, transport_security=_TSS(
+# DNS-rebinding protection is unnecessary for a Lambda deployment (no direct
+# localhost exposure); disabling avoids 421 responses on non-localhost hosts.
+mcp = FastMCP("personal-context", stateless_http=True, transport_security=TransportSecuritySettings(
     enable_dns_rebinding_protection=False,
 ))
 s3_client = boto3.client("s3")
