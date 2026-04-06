@@ -24,6 +24,7 @@ async def test_missing_auth_header_returns_401(protected_app):
         ) as client:
             response = await client.get("/")
     assert response.status_code == 401
+    assert response.json() == {"error": "Unauthorized"}
 
 
 @pytest.mark.asyncio

@@ -15,14 +15,18 @@ class BearerAuthMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] not in ("http", "websocket"):
-            # Pass through lifespan and other non-HTTP events
+        if scope["type"] != "http":
+            # Pass through lifespan, websocket, and other non-HTTP events
             await self.app(scope, receive, send)
             return
 
         expected = os.environ.get("MCP_BEARER_TOKEN", "")
         token = self._extract_bearer_token(scope)
 
+        # Short-circuit on empty expected/token: requests without a token are rejected
+        # faster than requests with a wrong token (timing side-channel). This is an
+        # accepted tradeoff for a personal server — constant-time rejection of all paths
+        # would require always calling compare_digest with dummy values.
         if not expected or not token or not hmac.compare_digest(token, expected):
             await self._reject_401(send)
             return
