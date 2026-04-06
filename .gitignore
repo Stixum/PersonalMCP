@@ -1,0 +1,13 @@
+# Lambda build artifacts
+package/
+function.zip
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Never commit secrets
+.env
