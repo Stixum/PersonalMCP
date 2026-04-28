@@ -3,6 +3,11 @@ set -euo pipefail
 
 FUNCTION_NAME="personal-mcp-server"
 PYTHON_BIN="python3.13"
+AWS_PROFILE="${AWS_PROFILE:-AdminAccess-<ACCT-REDACTED>}"
+AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
+
+export AWS_PROFILE AWS_DEFAULT_REGION
+export PATH="/opt/homebrew/bin:/opt/homebrew/Cellar/python@3.13/3.13.13_1/bin:/usr/local/bin:$PATH"
 
 echo "→ Cleaning previous build..."
 rm -rf package/ function.zip

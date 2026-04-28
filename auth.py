@@ -1,5 +1,8 @@
 import hmac
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 
 class BearerAuthMiddleware:
@@ -28,6 +31,7 @@ class BearerAuthMiddleware:
         # accepted tradeoff for a personal server — constant-time rejection of all paths
         # would require always calling compare_digest with dummy values.
         if not expected or not token or not hmac.compare_digest(token, expected):
+            logger.warning("auth_failure reason=%s", "missing_token" if not token else "invalid_token")
             await self._reject_401(send)
             return
 
