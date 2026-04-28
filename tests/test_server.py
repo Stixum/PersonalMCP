@@ -77,6 +77,39 @@ async def test_mcp_initialize_responds(mock_env, mock_s3_body):
     assert "result" in body
 
 
+def test_update_context_writes_to_s3(mock_env):
+    """update_context tool must write content to the correct S3 key."""
+    with patch.dict(os.environ, mock_env), \
+         patch("server.s3_client") as mock_s3:
+        from server import update_context
+        result = update_context("identity", "# New content")
+        mock_s3.put_object.assert_called_once_with(
+            Bucket="test-bucket",
+            Key="identity.md",
+            Body=b"# New content",
+        )
+        assert "identity" in result
+
+
+def test_update_context_rejects_unknown_name(mock_env):
+    """update_context tool must raise ValueError for unknown file names."""
+    with patch.dict(os.environ, mock_env):
+        from server import update_context
+        with pytest.raises(ValueError, match="Unknown context file"):
+            update_context("nonexistent", "content")
+
+
+def test_get_personal_context_single_section(mock_env, mock_s3_body):
+    """get_personal_context with a section name reads only that S3 key."""
+    with patch.dict(os.environ, mock_env), \
+         patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.return_value = {"Body": mock_s3_body}
+        from server import get_personal_context
+        result = get_personal_context("identity")
+        mock_s3.get_object.assert_called_once_with(Bucket="test-bucket", Key="identity.md")
+        assert "Identity" in result
+
+
 def test_portfolio_files_list_is_complete():
     """PORTFOLIO_FILES must contain all 10 expected file names."""
     from server import PORTFOLIO_FILES

@@ -8,7 +8,8 @@ echo "→ Cleaning previous build..."
 rm -rf package/ function.zip
 
 echo "→ Installing dependencies (Python 3.13 to match Lambda runtime)..."
-${PYTHON_BIN} -m pip install -r requirements.txt -t package/ --quiet
+${PYTHON_BIN} -m pip install -r requirements.txt -t package/ --quiet \
+  --platform manylinux2014_x86_64 --only-binary=:all:
 
 echo "→ Packaging..."
 cp server.py auth.py package/
