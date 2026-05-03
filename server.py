@@ -24,10 +24,10 @@ PORTFOLIO_FILES = [
     "domain-knowledge",
     "communication-style",
     "preferences-and-constraints",
+    "project-operational-rules",
+    "ai-assistant-instructions",
     "tools-and-systems",
-    "team-and-relationships",
     "current-projects",
-    "decision-log",
 ]
 
 # DNS-rebinding protection is unnecessary for a Lambda deployment (no direct
@@ -48,7 +48,8 @@ def get_personal_context(section: str = "") -> str:
 
     Available sections: identity, role-and-responsibilities, goals-and-priorities,
     domain-knowledge, communication-style, preferences-and-constraints,
-    tools-and-systems, team-and-relationships, current-projects, decision-log
+    project-operational-rules, ai-assistant-instructions, tools-and-systems,
+    current-projects
     """
     bucket = os.environ["S3_BUCKET"]
 
@@ -73,7 +74,8 @@ def update_context(name: str, content: str) -> str:
         name: Section name without .md extension. Must be one of:
             identity, role-and-responsibilities, goals-and-priorities,
             domain-knowledge, communication-style, preferences-and-constraints,
-            tools-and-systems, team-and-relationships, current-projects, decision-log
+            project-operational-rules, ai-assistant-instructions, tools-and-systems,
+            current-projects
         content: Full markdown content to write (replaces the file).
     """
     if name not in PORTFOLIO_FILES:
