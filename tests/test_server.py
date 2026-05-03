@@ -120,7 +120,7 @@ def test_portfolio_files_list_is_complete():
         "domain-knowledge",
         "communication-style",
         "preferences-and-constraints",
-        "project-operational-rules",
+        "operational-rules",
         "ai-assistant-instructions",
         "tools-and-systems",
         "current-projects",
