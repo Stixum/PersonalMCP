@@ -68,7 +68,7 @@ def _fetch(key: str) -> str:
 @mcp.tool()
 def get_personal_context(section: str = "") -> str:
     """
-    Read personal context about the operator from the portfolio.
+    Read the operator's personal context from the portfolio.
 
     If section is empty or omitted, returns all sections concatenated.
     If section is specified, returns just that section.

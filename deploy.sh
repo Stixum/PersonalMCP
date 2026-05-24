@@ -4,7 +4,9 @@ set -euo pipefail
 FUNCTION_NAME="personal-mcp-server"
 ALIAS_NAME="live"
 PYTHON_BIN="python3.13"
-AWS_PROFILE="${AWS_PROFILE:-AdminAccess-<ACCT-REDACTED>}"
+# AWS_PROFILE must be set (no default — keeps the account-specific profile name
+# out of the repo). Operator's actual profile is documented in operator-private notes.
+: "${AWS_PROFILE:?must be set, e.g. AWS_PROFILE=AdminAccess-<acct-id> ./deploy.sh}"
 AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 
 export AWS_PROFILE AWS_DEFAULT_REGION
