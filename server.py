@@ -11,7 +11,9 @@ Environment variables required:
 """
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 import boto3
+from botocore.exceptions import ClientError
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -37,6 +39,31 @@ mcp = FastMCP("personal-context", stateless_http=True, transport_security=Transp
 ))
 s3_client = boto3.client("s3")
 
+# Process-level cache: persists across warm Lambda invocations.
+# {key: (etag, decoded_content)}. ETag-conditional GETs let S3 short-circuit
+# unchanged files with a 304 (~5ms vs ~30ms for a full body fetch).
+_cache: dict[str, tuple[str, str]] = {}
+
+
+def _fetch(key: str) -> str:
+    """Fetch an S3 object, using a cached copy when the ETag matches."""
+    bucket = os.environ["S3_BUCKET"]
+    cached = _cache.get(key)
+    kwargs = {"Bucket": bucket, "Key": key}
+    if cached:
+        kwargs["IfNoneMatch"] = cached[0]
+    try:
+        response = s3_client.get_object(**kwargs)
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "304":
+            return cached[1]
+        raise
+    content = response["Body"].read().decode("utf-8")
+    etag = response.get("ETag", "")
+    if etag:
+        _cache[key] = (etag, content)
+    return content
+
 
 @mcp.tool()
 def get_personal_context(section: str = "") -> str:
@@ -51,18 +78,15 @@ def get_personal_context(section: str = "") -> str:
     operational-rules, ai-assistant-instructions, tools-and-systems,
     current-projects
     """
-    bucket = os.environ["S3_BUCKET"]
-
     if section and section in PORTFOLIO_FILES:
-        response = s3_client.get_object(Bucket=bucket, Key=f"{section}.md")
-        return response["Body"].read().decode("utf-8")
+        return _fetch(f"{section}.md")
 
-    parts = []
-    for name in PORTFOLIO_FILES:
-        response = s3_client.get_object(Bucket=bucket, Key=f"{name}.md")
-        content = response["Body"].read().decode("utf-8")
-        parts.append(f"## {name}\n\n{content}")
-    return "\n\n---\n\n".join(parts)
+    keys = [f"{name}.md" for name in PORTFOLIO_FILES]
+    with ThreadPoolExecutor(max_workers=len(keys)) as pool:
+        contents = list(pool.map(_fetch, keys))
+    return "\n\n---\n\n".join(
+        f"## {name}\n\n{content}" for name, content in zip(PORTFOLIO_FILES, contents)
+    )
 
 
 @mcp.tool()
@@ -86,6 +110,7 @@ def update_context(name: str, content: str) -> str:
         raise ValueError("content must be non-empty")
     bucket = os.environ["S3_BUCKET"]
     s3_client.put_object(Bucket=bucket, Key=f"{name}.md", Body=content.encode("utf-8"))
+    _cache.pop(f"{name}.md", None)
     return f"Updated {name}.md"
 
 
@@ -115,6 +140,7 @@ def append_to_context(name: str, content: str, separator: str = "\n\n") -> str:
     existing = s3_client.get_object(Bucket=bucket, Key=f"{name}.md")["Body"].read().decode("utf-8")
     merged = existing.rstrip() + separator + content
     s3_client.put_object(Bucket=bucket, Key=f"{name}.md", Body=merged.encode("utf-8"))
+    _cache.pop(f"{name}.md", None)
     return f"Appended {len(content)} chars to {name}.md"
 
 

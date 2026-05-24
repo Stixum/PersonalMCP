@@ -2,22 +2,23 @@
 
 ## What This Is
 
-Personal MCP resource server. Exposes 10 markdown portfolio files from S3 as MCP
-resources so any MCP client (Claude Desktop, Claude Code, claude.ai) automatically
-has personal context without copy-pasting.
+Personal MCP server. Exposes personal context to any MCP client (Claude Desktop,
+Claude Code, claude.ai) via three tools backed by 10 markdown portfolio files in S3:
+`get_personal_context(section)`, `update_context(name, content)` (full-file replace),
+and `append_to_context(name, content)` (incremental append).
 
 ## Stack
 
 - Python 3.13 (must match Lambda runtime — use `python3.13` not `python3`)
-- MCP SDK: `mcp[cli]` — FastMCP from `mcp.server.fastmcp`
-- Starlette/ASGI served via Mangum on Lambda Function URL (BUFFERED mode)
-- S3 for file storage — update files without redeploying
+- MCP SDK: `mcp` — FastMCP from `mcp.server.fastmcp`
+- Starlette/ASGI served via Mangum on Lambda Function URL (BUFFERED mode), arm64/Graviton
+- S3 for file storage — update files without redeploying; warm Lambdas cache by ETag
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `server.py` | FastMCP + 10 resource registrations + Lambda handler |
+| `server.py` | FastMCP + 3 tools + ETag cache + Lambda handler |
 | `auth.py` | BearerAuthMiddleware (ASGI, hmac.compare_digest) |
 | `deploy.sh` | Build zip and push to Lambda |
 | `placeholder/` | Local reference copies of portfolio .md files |

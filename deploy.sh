@@ -12,9 +12,9 @@ export PATH="/opt/homebrew/bin:/opt/homebrew/Cellar/python@3.13/3.13.13_1/bin:/u
 echo "→ Cleaning previous build..."
 rm -rf package/ function.zip
 
-echo "→ Installing dependencies (Python 3.13 to match Lambda runtime)..."
+echo "→ Installing dependencies (Python 3.13 to match Lambda runtime, arm64/Graviton)..."
 ${PYTHON_BIN} -m pip install -r requirements.txt -t package/ --quiet \
-  --platform manylinux2014_x86_64 --only-binary=:all:
+  --platform manylinux2014_aarch64 --only-binary=:all:
 
 echo "→ Packaging..."
 cp server.py auth.py package/

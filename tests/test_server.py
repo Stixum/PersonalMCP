@@ -1,6 +1,7 @@
 import os
 import pytest
 from unittest.mock import patch, MagicMock
+from botocore.exceptions import ClientError
 from httpx import AsyncClient, ASGITransport
 from asgi_lifespan import LifespanManager
 
@@ -15,6 +16,15 @@ def mock_s3_body():
     body = MagicMock()
     body.read.return_value = b"# Identity\n\nPlaceholder content."
     return body
+
+
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    """Reset the module-level ETag cache between tests."""
+    import server
+    server._cache.clear()
+    yield
+    server._cache.clear()
 
 
 def test_create_app_returns_callable():
@@ -142,11 +152,58 @@ def test_get_personal_context_single_section(mock_env, mock_s3_body):
     """get_personal_context with a section name reads only that S3 key."""
     with patch.dict(os.environ, mock_env), \
          patch("server.s3_client") as mock_s3:
-        mock_s3.get_object.return_value = {"Body": mock_s3_body}
+        mock_s3.get_object.return_value = {"Body": mock_s3_body, "ETag": '"abc"'}
         from server import get_personal_context
         result = get_personal_context("identity")
         mock_s3.get_object.assert_called_once_with(Bucket="test-bucket", Key="identity.md")
         assert "Identity" in result
+
+
+def test_get_personal_context_uses_etag_cache_on_second_call(mock_env, mock_s3_body):
+    """Second call sends IfNoneMatch with cached ETag and uses cached body on 304."""
+    with patch.dict(os.environ, mock_env), \
+         patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.side_effect = [
+            {"Body": mock_s3_body, "ETag": '"abc"'},
+            ClientError({"Error": {"Code": "304", "Message": "Not Modified"}}, "GetObject"),
+        ]
+        from server import get_personal_context
+        first = get_personal_context("identity")
+        second = get_personal_context("identity")
+        assert first == second
+        assert mock_s3.get_object.call_count == 2
+        second_call_kwargs = mock_s3.get_object.call_args_list[1].kwargs
+        assert second_call_kwargs.get("IfNoneMatch") == '"abc"'
+
+
+def test_update_context_invalidates_cache(mock_env, mock_s3_body):
+    """After update_context, the cached copy must be evicted so the next read fetches fresh."""
+    import server
+    with patch.dict(os.environ, mock_env), \
+         patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.return_value = {"Body": mock_s3_body, "ETag": '"abc"'}
+        server.get_personal_context("identity")
+        assert "identity.md" in server._cache
+        server.update_context("identity", "# Replaced")
+        assert "identity.md" not in server._cache
+
+
+def test_get_personal_context_all_sections_fetches_all_keys(mock_env):
+    """No section means fetch all 10 portfolio files (concurrently)."""
+    def make_body(text: bytes):
+        b = MagicMock()
+        b.read.return_value = text
+        return b
+    with patch.dict(os.environ, mock_env), \
+         patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.side_effect = lambda **kwargs: {
+            "Body": make_body(b"# " + kwargs["Key"].encode()), "ETag": '"' + kwargs["Key"] + '"',
+        }
+        from server import get_personal_context, PORTFOLIO_FILES
+        result = get_personal_context()
+        assert mock_s3.get_object.call_count == len(PORTFOLIO_FILES)
+        for name in PORTFOLIO_FILES:
+            assert f"## {name}" in result
 
 
 def test_portfolio_files_list_is_complete():

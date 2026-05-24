@@ -54,4 +54,5 @@ class BearerAuthMiddleware:
         await send({
             "type": "http.response.body",
             "body": b'{"error": "Unauthorized"}',
+            "more_body": False,
         })
