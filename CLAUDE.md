@@ -22,7 +22,8 @@ and `append_to_context(name, content)` (incremental append).
 | `server.py` | FastMCP + 3 tools + ETag cache + Lambda handler |
 | `auth.py` | BearerAuthMiddleware (ASGI, hmac.compare_digest) |
 | `deploy.sh` | Build zip and push to Lambda |
-| `placeholder/` | Local reference copies of portfolio .md files |
+| `placeholder.example/` | **Committed.** Generic templates describing each portfolio file — safe to share, no personal data. |
+| `placeholder/` | **Gitignored.** The operator's real local copies of the 10 portfolio .md files. Edit here, then `aws s3 sync placeholder/ s3://$S3_BUCKET/` to push live. |
 
 ## Environment Variables (Lambda only — never in code)
 
