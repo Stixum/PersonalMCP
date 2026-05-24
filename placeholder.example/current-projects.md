@@ -2,7 +2,8 @@
 
 A **table of contents** of active projects, with pointers to their deep
 documentation. This file is intentionally shallow — the actual project
-detail lives in the knowledge base (Notion, etc.), not here.
+detail lives in the operator's knowledge base (Notion, a local markdown
+vault, etc.), not here.
 
 ## Why shallow
 

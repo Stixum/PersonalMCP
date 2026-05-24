@@ -5,7 +5,7 @@ FUNCTION_NAME="personal-mcp-server"
 ALIAS_NAME="live"
 PYTHON_BIN="python3.13"
 # AWS_PROFILE must be set (no default — keeps the account-specific profile name
-# out of the repo). Operator's actual profile is documented in operator-private notes.
+# out of the repo). Operator's actual profile is documented in their private notes.
 : "${AWS_PROFILE:?must be set, e.g. AWS_PROFILE=AdminAccess-<acct-id> ./deploy.sh}"
 AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 

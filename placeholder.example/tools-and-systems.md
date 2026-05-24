@@ -7,7 +7,7 @@ preferred, and where things live.
 
 - **Editors / IDEs** — what's open and integrated
 - **Cloud / hosting** — primary provider, account structure, regions
-- **Knowledge base** — where notes/docs live (operator-private notes vault path, Notion workspace, etc.)
+- **Knowledge base** — where notes/docs live (e.g., a Notion workspace, a local markdown vault, etc.)
 - **Source control** — GitHub org/user, branching conventions
 - **Communication tools** — Slack, email, etc., if relevant to async tasks
 - **MCP servers** — what's connected, what each provides

@@ -57,7 +57,9 @@ aws s3 cp placeholder/current-projects.md s3://$S3_BUCKET/
 aws s3 sync placeholder/ s3://$S3_BUCKET/
 ```
 
-## AWS Resources (dedicated, isolated from all other projects)
+## AWS Resources
 
-See private project notes for ARNs, account ID, and resource names.
-Token is in Lambda env vars — never stored here.
+Dedicated, isolated from all other projects. ARNs, account ID, and resource
+names are kept in operator-private notes outside this repo. The bearer
+token lives only in Lambda environment variables — never in code or any
+file in this repo.
