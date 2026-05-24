@@ -13,6 +13,7 @@ and `append_to_context(name, content)` (incremental append).
 - MCP SDK: `mcp` — FastMCP from `mcp.server.fastmcp`
 - Starlette/ASGI served via Mangum on Lambda Function URL (BUFFERED mode), arm64/Graviton
 - S3 for file storage — update files without redeploying; warm Lambdas cache by ETag
+- **SnapStart enabled.** The Function URL targets the `live` alias of a published version (not `$LATEST`). `deploy.sh` publishes a new version and re-points the alias on every deploy — do not bypass it.
 
 ## Key Files
 
@@ -44,6 +45,8 @@ python -m pytest tests/ -v
 ```
 
 Requires `python3.13` on PATH. Install via `brew install python@3.13` if missing.
+
+`deploy.sh` does five things in order: build arm64 zip → update `$LATEST` code → publish a new version → wait for the SnapStart snapshot to optimize → re-point alias `live` at the new version. The Function URL targets the alias, so the URL itself does not change across deploys — only an alias swap. **Do not** invoke `aws lambda update-function-code` directly; the alias would still point at the previous version.
 
 ## Updating Portfolio Content (no redeploy needed)
 
