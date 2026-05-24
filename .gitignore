@@ -15,3 +15,6 @@ backups/
 
 # Real portfolio content — never commit (live source is S3)
 placeholder/
+
+# Design plans/specs may inline personal data — keep local only
+docs/superpowers/
