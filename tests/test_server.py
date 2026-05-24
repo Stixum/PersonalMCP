@@ -99,6 +99,45 @@ def test_update_context_rejects_unknown_name(mock_env):
             update_context("nonexistent", "content")
 
 
+def test_update_context_rejects_empty_content(mock_env):
+    """update_context must reject empty or whitespace-only content to prevent accidental wipes."""
+    with patch.dict(os.environ, mock_env):
+        from server import update_context
+        with pytest.raises(ValueError, match="non-empty"):
+            update_context("identity", "   \n  ")
+
+
+def test_append_to_context_concatenates_and_writes(mock_env):
+    """append_to_context fetches existing content, appends, and writes back."""
+    body = MagicMock()
+    body.read.return_value = b"# Identity\n\nExisting content."
+    with patch.dict(os.environ, mock_env), \
+         patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.return_value = {"Body": body}
+        from server import append_to_context
+        result = append_to_context("identity", "New paragraph.")
+        mock_s3.get_object.assert_called_once_with(Bucket="test-bucket", Key="identity.md")
+        put_kwargs = mock_s3.put_object.call_args.kwargs
+        assert put_kwargs["Bucket"] == "test-bucket"
+        assert put_kwargs["Key"] == "identity.md"
+        assert put_kwargs["Body"] == b"# Identity\n\nExisting content.\n\nNew paragraph."
+        assert "Appended" in result
+
+
+def test_append_to_context_rejects_unknown_name(mock_env):
+    with patch.dict(os.environ, mock_env):
+        from server import append_to_context
+        with pytest.raises(ValueError, match="Unknown context file"):
+            append_to_context("nonexistent", "content")
+
+
+def test_append_to_context_rejects_empty_content(mock_env):
+    with patch.dict(os.environ, mock_env):
+        from server import append_to_context
+        with pytest.raises(ValueError, match="non-empty"):
+            append_to_context("identity", "")
+
+
 def test_get_personal_context_single_section(mock_env, mock_s3_body):
     """get_personal_context with a section name reads only that S3 key."""
     with patch.dict(os.environ, mock_env), \

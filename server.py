@@ -68,7 +68,7 @@ def get_personal_context(section: str = "") -> str:
 @mcp.tool()
 def update_context(name: str, content: str) -> str:
     """
-    Write a portfolio context file to S3.
+    Write a portfolio context file to S3 (replaces entire file).
 
     Args:
         name: Section name without .md extension. Must be one of:
@@ -82,9 +82,40 @@ def update_context(name: str, content: str) -> str:
         raise ValueError(
             f"Unknown context file: {name!r}. Valid names: {', '.join(PORTFOLIO_FILES)}"
         )
+    if not content.strip():
+        raise ValueError("content must be non-empty")
     bucket = os.environ["S3_BUCKET"]
     s3_client.put_object(Bucket=bucket, Key=f"{name}.md", Body=content.encode("utf-8"))
     return f"Updated {name}.md"
+
+
+@mcp.tool()
+def append_to_context(name: str, content: str, separator: str = "\n\n") -> str:
+    """
+    Append content to an existing portfolio context file in S3.
+
+    Use this for incremental additions (new entries, sub-sections) so the caller
+    does not need to read, regenerate, and rewrite the whole file. The current
+    file is fetched, the new content is concatenated with the separator, and the
+    result is written back.
+
+    Args:
+        name: Section name without .md extension (see update_context for the list).
+        content: Markdown content to append.
+        separator: String inserted between existing content and the appended
+            content. Defaults to a blank line ("\\n\\n").
+    """
+    if name not in PORTFOLIO_FILES:
+        raise ValueError(
+            f"Unknown context file: {name!r}. Valid names: {', '.join(PORTFOLIO_FILES)}"
+        )
+    if not content.strip():
+        raise ValueError("content must be non-empty")
+    bucket = os.environ["S3_BUCKET"]
+    existing = s3_client.get_object(Bucket=bucket, Key=f"{name}.md")["Body"].read().decode("utf-8")
+    merged = existing.rstrip() + separator + content
+    s3_client.put_object(Bucket=bucket, Key=f"{name}.md", Body=merged.encode("utf-8"))
+    return f"Appended {len(content)} chars to {name}.md"
 
 
 async def _reject_get_sse(scope, receive, send):
