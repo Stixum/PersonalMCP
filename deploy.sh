@@ -18,6 +18,8 @@ ${PYTHON_BIN} -m pip install -r requirements.txt -t package/ --quiet \
 
 echo "→ Packaging..."
 cp server.py auth.py package/
+# Strip bytecode caches — they get regenerated on Lambda and only inflate the zip.
+find package -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 cd package && zip -r ../function.zip . --quiet && cd ..
 
 echo "→ Deploying to Lambda..."
