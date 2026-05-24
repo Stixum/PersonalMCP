@@ -12,3 +12,6 @@ __pycache__/
 # Never commit secrets
 .env
 backups/
+
+# Real portfolio content — never commit (live source is S3)
+placeholder/
