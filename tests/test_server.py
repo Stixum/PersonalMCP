@@ -188,22 +188,94 @@ def test_update_context_invalidates_cache(mock_env, mock_s3_body):
         assert "identity.md" not in server._cache
 
 
-def test_get_personal_context_all_sections_fetches_all_keys(mock_env):
-    """No section means fetch all 10 portfolio files (concurrently)."""
-    def make_body(text: bytes):
+def _section_fixture(bodies: dict[str, bytes]):
+    """Build an s3 get_object side_effect serving per-key markdown bodies."""
+    def side_effect(**kwargs):
         b = MagicMock()
-        b.read.return_value = text
-        return b
+        key = kwargs["Key"]
+        b.read.return_value = bodies.get(key, b"# " + key.encode())
+        return {"Body": b, "ETag": '"' + key + '"'}
+    return side_effect
+
+
+def test_get_personal_context_no_arg_returns_manifest(mock_env):
+    """No section returns a lightweight index, not the full portfolio dump."""
+    bodies = {
+        "identity.md": b"# Identity\n\nSean - full identity text here.",
+        "operational-rules.md": (
+            b"# Operational Rules\n\nHow I operate.\n\n"
+            b"## Deployment\n\nAlways commit first.\n\n"
+            b"## Security\n\nNever log secrets."
+        ),
+    }
     with patch.dict(os.environ, mock_env), \
          patch("server.s3_client") as mock_s3:
-        mock_s3.get_object.side_effect = lambda **kwargs: {
-            "Body": make_body(b"# " + kwargs["Key"].encode()), "ETag": '"' + kwargs["Key"] + '"',
-        }
+        mock_s3.get_object.side_effect = _section_fixture(bodies)
         from server import get_personal_context, PORTFOLIO_FILES
         result = get_personal_context()
+        # Still fetches every file to build the index...
         assert mock_s3.get_object.call_count == len(PORTFOLIO_FILES)
-        for name in PORTFOLIO_FILES:
-            assert f"## {name}" in result
+        # ...but identity is inlined in full while other sections are summarised.
+        assert "Sean - full identity text here." in result
+        assert "operational-rules#deployment" in result
+        assert "operational-rules#security" in result
+        # The heavy section BODY is NOT dumped into the index.
+        assert "Always commit first." not in result
+        assert "Never log secrets." not in result
+
+
+def test_get_personal_context_heading_slice(mock_env):
+    """section#heading returns only that subsection, sliced at the next same-level heading."""
+    body = MagicMock()
+    body.read.return_value = (
+        b"# Operational Rules\n\nIntro.\n\n"
+        b"## Deployment\n\nAlways commit first.\nThen run deploy.sh.\n\n"
+        b"## Security\n\nNever log secrets."
+    )
+    with patch.dict(os.environ, mock_env), \
+         patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.return_value = {"Body": body, "ETag": '"x"'}
+        from server import get_personal_context
+        result = get_personal_context("operational-rules#deployment")
+        mock_s3.get_object.assert_called_once_with(
+            Bucket="test-bucket", Key="operational-rules.md"
+        )
+        assert "Always commit first." in result
+        assert "Then run deploy.sh." in result
+        # Stops before the next ## heading.
+        assert "Never log secrets." not in result
+        assert "Intro." not in result
+
+
+def test_get_personal_context_unknown_heading_lists_available(mock_env):
+    """An unmatched heading raises with the available slugs to guide the next call."""
+    body = MagicMock()
+    body.read.return_value = b"# Rules\n\n## Deployment\n\nx\n\n## Security\n\ny"
+    with patch.dict(os.environ, mock_env), \
+         patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.return_value = {"Body": body, "ETag": '"x"'}
+        from server import get_personal_context
+        with pytest.raises(ValueError, match="deployment, security"):
+            get_personal_context("operational-rules#nonexistent")
+
+
+def test_get_personal_context_unknown_section_raises(mock_env):
+    """A non-empty unknown section name raises instead of silently dumping everything."""
+    with patch.dict(os.environ, mock_env), \
+         patch("server.s3_client"):
+        from server import get_personal_context
+        with pytest.raises(ValueError, match="Unknown section"):
+            get_personal_context("nonexistent")
+
+
+def test_get_personal_context_heading_unknown_section_raises(mock_env):
+    """An unknown section in section#heading form raises before any S3 fetch."""
+    with patch.dict(os.environ, mock_env), \
+         patch("server.s3_client") as mock_s3:
+        from server import get_personal_context
+        with pytest.raises(ValueError, match="Unknown section"):
+            get_personal_context("nonexistent#heading")
+        mock_s3.get_object.assert_not_called()
 
 
 def test_portfolio_files_list_is_complete():

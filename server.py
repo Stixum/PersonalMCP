@@ -11,6 +11,7 @@ Environment variables required:
 """
 
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 import boto3
 from botocore.exceptions import ClientError
@@ -65,28 +66,140 @@ def _fetch(key: str) -> str:
     return content
 
 
+# Matches ATX markdown headings ("## Heading"); group 1 = hashes, group 2 = text.
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
+
+
+def _slug(text: str) -> str:
+    """Lowercase, collapse non-alphanumerics to single hyphens (heading -> address)."""
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def _headings(content: str) -> list[tuple[int, int, str]]:
+    """Return (line_index, level, text) for each ATX heading in document order."""
+    out = []
+    for i, line in enumerate(content.splitlines()):
+        m = _HEADING_RE.match(line)
+        if m:
+            out.append((i, len(m.group(1)), m.group(2)))
+    return out
+
+
+def _summary(content: str) -> str:
+    """First non-blank, non-heading, non-quote line, trimmed to one sentence-ish line."""
+    for line in content.splitlines():
+        s = line.strip()
+        if s and not s.startswith(("#", ">", "---", "|")):
+            return s[:160] + ("…" if len(s) > 160 else "")
+    return ""
+
+
+def _slice_section(content: str, heading_query: str) -> str:
+    """
+    Return the subsection under the heading matching `heading_query`.
+
+    Matches by slug equality first, then slug substring. The slice runs from the
+    matched heading line up to (not including) the next heading of equal-or-higher
+    level. Raises ValueError listing available slugs when nothing matches.
+    """
+    target = _slug(heading_query)
+    heads = _headings(content)
+    match = next((h for h in heads if h[2] and _slug(h[2]) == target), None)
+    if match is None:
+        match = next((h for h in heads if target and target in _slug(h[2])), None)
+    if match is None:
+        avail = ", ".join(_slug(h[2]) for h in heads) or "(no headings in this section)"
+        raise ValueError(
+            f"Heading {heading_query!r} not found. Available headings: {avail}"
+        )
+    start, level, _ = match
+    end = next((i for (i, lvl, _) in heads if i > start and lvl <= level), None)
+    lines = content.splitlines()
+    return "\n".join(lines[start:end]).strip()
+
+
+def _build_manifest(sections: dict[str, str]) -> str:
+    """
+    Build the lightweight index returned by a no-argument call.
+
+    Includes `identity` in full (small and always relevant) plus, for every other
+    section, its size, a one-line summary, and the addressable heading slugs. The
+    caller uses this to pull only what a task needs instead of the whole portfolio.
+    """
+    parts = [
+        "# Personal context — index",
+        "",
+        'Pull only what you need: call get_personal_context("<section>") for a '
+        'whole section, or get_personal_context("<section>#<heading-slug>") for a '
+        "single subsection. The addressable slugs are listed under each section "
+        "below. (A no-argument call returns this index, not the full portfolio.)",
+        "",
+        "---",
+        "",
+        sections.get("identity", "").strip(),
+        "",
+        "---",
+        "",
+        "## Available sections",
+    ]
+    for name in PORTFOLIO_FILES:
+        if name == "identity":
+            continue
+        content = sections.get(name, "")
+        size = len(content)
+        size_str = f"{size / 1000:.1f}K chars" if size >= 1000 else f"{size} chars"
+        parts.append("")
+        parts.append(f"### {name}  ({size_str})")
+        summary = _summary(content)
+        if summary:
+            parts.append(summary)
+        subs = [(lvl, text) for (_, lvl, text) in _headings(content) if lvl >= 2]
+        if subs:
+            parts.append("Subsections:")
+            for lvl, text in subs:
+                indent = "  " * (lvl - 2)
+                parts.append(f"  {indent}- {name}#{_slug(text)}")
+    return "\n".join(parts)
+
+
 @mcp.tool()
 def get_personal_context(section: str = "") -> str:
     """
     Read the operator's personal context from the portfolio.
 
-    If section is empty or omitted, returns all sections concatenated.
-    If section is specified, returns just that section.
+    Three call modes:
+      - No argument: returns a lightweight INDEX — `identity` in full plus, for
+        every other section, its size, a one-line summary, and the addressable
+        heading slugs. Start here to see what exists, then pull what you need.
+        (It does NOT return the full portfolio; that is too large to load at once.)
+      - section="<name>": returns that whole section.
+      - section="<name>#<heading-slug>": returns just that subsection of the file
+        (slugs come from the index, e.g. "operational-rules#deployment").
 
     Available sections: identity, role-and-responsibilities, goals-and-priorities,
     domain-knowledge, communication-style, preferences-and-constraints,
     operational-rules, ai-assistant-instructions, tools-and-systems,
     current-projects
     """
-    if section and section in PORTFOLIO_FILES:
+    if "#" in section:
+        name, _, heading = section.partition("#")
+        if name not in PORTFOLIO_FILES:
+            raise ValueError(
+                f"Unknown section {name!r}. Valid sections: {', '.join(PORTFOLIO_FILES)}"
+            )
+        return _slice_section(_fetch(f"{name}.md"), heading)
+
+    if section:
+        if section not in PORTFOLIO_FILES:
+            raise ValueError(
+                f"Unknown section {section!r}. Valid sections: {', '.join(PORTFOLIO_FILES)}"
+            )
         return _fetch(f"{section}.md")
 
     keys = [f"{name}.md" for name in PORTFOLIO_FILES]
     with ThreadPoolExecutor(max_workers=len(keys)) as pool:
         contents = list(pool.map(_fetch, keys))
-    return "\n\n---\n\n".join(
-        f"## {name}\n\n{content}" for name, content in zip(PORTFOLIO_FILES, contents)
-    )
+    return _build_manifest(dict(zip(PORTFOLIO_FILES, contents)))
 
 
 @mcp.tool()
