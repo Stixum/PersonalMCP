@@ -278,6 +278,165 @@ def test_get_personal_context_heading_unknown_section_raises(mock_env):
         mock_s3.get_object.assert_not_called()
 
 
+def _body(text: bytes):
+    b = MagicMock()
+    b.read.return_value = text
+    return b
+
+
+_RULES = (
+    b"# Operational Rules\n\nIntro line.\n\n"
+    b"## Deployment\n\nAlways commit first.\nThen run deploy.sh.\n\n"
+    b"## Security\n\nNever log secrets.\n"
+)
+
+
+def test_update_subsection_replaces_in_place(mock_env):
+    """Rewrites only the matched subsection; siblings and earlier sections untouched."""
+    with patch.dict(os.environ, mock_env), patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.return_value = {"Body": _body(_RULES)}
+        from server import update_subsection
+        result = update_subsection(
+            "operational-rules", "deployment",
+            "## Deployment\n\nDeploy only from a clean tree.",
+        )
+        body = mock_s3.put_object.call_args.kwargs["Body"].decode()
+        assert "Deploy only from a clean tree." in body
+        assert "Always commit first." not in body          # old body replaced
+        assert "## Security\n\nNever log secrets." in body  # sibling intact
+        assert "Intro line." in body                        # earlier section intact
+        assert body.count("## Deployment") == 1             # heading not duplicated
+        assert "operational-rules#deployment" in result
+
+
+def test_update_subsection_last_section_eof(mock_env):
+    """Replacing the final section (no following heading) works and leaves earlier intact."""
+    with patch.dict(os.environ, mock_env), patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.return_value = {"Body": _body(_RULES)}
+        from server import update_subsection
+        update_subsection("operational-rules", "security", "## Security\n\nRotate tokens.")
+        body = mock_s3.put_object.call_args.kwargs["Body"].decode()
+        assert body.rstrip().endswith("Rotate tokens.")
+        assert "Never log secrets." not in body
+        assert "Always commit first." in body               # untouched
+
+
+def test_update_subsection_nested_level(mock_env):
+    """A level-3 subsection is bounded by the next equal-or-higher heading, not consumed."""
+    nested = (
+        b"# Doc\n\n## Global\n\nintro\n\n"
+        b"### Rule One\n\nold one\n\n### Rule Two\n\nold two\n\n## Next\n\ntail\n"
+    )
+    with patch.dict(os.environ, mock_env), patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.return_value = {"Body": _body(nested)}
+        from server import update_subsection
+        update_subsection("operational-rules", "rule-one", "### Rule One\n\nNEW ONE")
+        body = mock_s3.put_object.call_args.kwargs["Body"].decode()
+        assert "NEW ONE" in body
+        assert "old one" not in body
+        assert "### Rule Two\n\nold two" in body             # sibling subsection intact
+        assert "## Next\n\ntail" in body
+
+
+def test_update_subsection_unknown_section_raises(mock_env):
+    with patch.dict(os.environ, mock_env), patch("server.s3_client"):
+        from server import update_subsection
+        with pytest.raises(ValueError, match="Unknown context file"):
+            update_subsection("nope", "deployment", "## Deployment\n\nx")
+
+
+def test_update_subsection_unknown_heading_lists_available(mock_env):
+    with patch.dict(os.environ, mock_env), patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.return_value = {"Body": _body(_RULES)}
+        from server import update_subsection
+        with pytest.raises(ValueError, match="deployment, security"):
+            update_subsection("operational-rules", "nonexistent", "## Nonexistent\n\nx")
+        mock_s3.put_object.assert_not_called()
+
+
+def test_update_subsection_exact_match_no_substring(mock_env):
+    """'deploy' must NOT match 'deployment' for a destructive write."""
+    with patch.dict(os.environ, mock_env), patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.return_value = {"Body": _body(_RULES)}
+        from server import update_subsection
+        with pytest.raises(ValueError, match="not found"):
+            update_subsection("operational-rules", "deploy", "## Deploy\n\nx")
+        mock_s3.put_object.assert_not_called()
+
+
+def test_update_subsection_ambiguous_slug_raises(mock_env):
+    """A slug shared by 2+ headings raises instead of overwriting the wrong one."""
+    dupe = b"# F\n\n## Notes\n\nA.\n\n## Other\n\nB.\n\n## Notes\n\nC.\n"
+    with patch.dict(os.environ, mock_env), patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.return_value = {"Body": _body(dupe)}
+        from server import update_subsection
+        with pytest.raises(ValueError, match="ambiguous"):
+            update_subsection("current-projects", "notes", "## Notes\n\nNew.")
+        mock_s3.put_object.assert_not_called()
+
+
+def test_update_subsection_rejects_content_missing_heading(mock_env):
+    with patch.dict(os.environ, mock_env), patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.return_value = {"Body": _body(_RULES)}
+        from server import update_subsection
+        with pytest.raises(ValueError, match="must begin with the heading"):
+            update_subsection("operational-rules", "deployment", "Just body, no heading.")
+        mock_s3.put_object.assert_not_called()
+
+
+def test_update_subsection_rejects_wrong_level(mock_env):
+    with patch.dict(os.environ, mock_env), patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.return_value = {"Body": _body(_RULES)}
+        from server import update_subsection
+        with pytest.raises(ValueError, match="must begin with the heading"):
+            update_subsection("operational-rules", "deployment", "### Deployment\n\nx")
+        mock_s3.put_object.assert_not_called()
+
+
+def test_update_subsection_rejects_empty_content(mock_env):
+    with patch.dict(os.environ, mock_env), patch("server.s3_client"):
+        from server import update_subsection
+        with pytest.raises(ValueError, match="non-empty"):
+            update_subsection("operational-rules", "deployment", "   ")
+
+
+def test_update_subsection_normalizes_spacing(mock_env):
+    """No tripled blank lines, exactly one blank line before the following heading."""
+    with patch.dict(os.environ, mock_env), patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.return_value = {"Body": _body(_RULES)}
+        from server import update_subsection
+        update_subsection("operational-rules", "deployment", "## Deployment\n\nNew body.")
+        body = mock_s3.put_object.call_args.kwargs["Body"].decode()
+        assert "\n\n\n" not in body
+        assert "New body.\n\n## Security" in body
+
+
+def test_update_subsection_invalidates_cache(mock_env):
+    import server
+    with patch.dict(os.environ, mock_env), patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.return_value = {"Body": _body(_RULES), "ETag": '"x"'}
+        server.get_personal_context("operational-rules")
+        assert "operational-rules.md" in server._cache
+        server.update_subsection("operational-rules", "deployment", "## Deployment\n\nNew.")
+        assert "operational-rules.md" not in server._cache
+
+
+def test_update_subsection_roundtrip_is_idempotent(mock_env):
+    """Reading a subsection then writing it straight back leaves the file byte-stable."""
+    import server
+    original = (
+        "# Operational Rules\n\nIntro line.\n\n"
+        "## Deployment\n\nAlways commit first.\nThen run deploy.sh.\n\n"
+        "## Security\n\nNever log secrets.\n"
+    )
+    with patch.dict(os.environ, mock_env), patch("server.s3_client") as mock_s3:
+        mock_s3.get_object.return_value = {"Body": _body(original.encode()), "ETag": '"x"'}
+        section = server.get_personal_context("operational-rules#deployment")
+        server.update_subsection("operational-rules", "deployment", section)
+        body = mock_s3.put_object.call_args.kwargs["Body"].decode()
+        assert body == original
+
+
 def test_portfolio_files_list_is_complete():
     """PORTFOLIO_FILES must contain all 10 expected file names."""
     from server import PORTFOLIO_FILES

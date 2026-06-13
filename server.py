@@ -94,28 +94,56 @@ def _summary(content: str) -> str:
     return ""
 
 
-def _slice_section(content: str, heading_query: str) -> str:
+def _locate_section(
+    content: str,
+    heading_query: str,
+    *,
+    exact_only: bool = False,
+    require_unique: bool = False,
+) -> tuple[int, int, int, str]:
     """
-    Return the subsection under the heading matching `heading_query`.
+    Locate the subsection under the heading matching `heading_query`.
 
-    Matches by slug equality first, then slug substring. The slice runs from the
-    matched heading line up to (not including) the next heading of equal-or-higher
-    level. Raises ValueError listing available slugs when nothing matches.
+    Returns (start, end, level, text): the slice runs from the matched heading line
+    `start` up to (not including) `end` — the next heading of equal-or-higher level,
+    or end-of-file.
+
+    Matching is by slug equality first. With `exact_only=False` it falls back to a
+    slug-substring match (retrieval convenience). With `require_unique=True` a slug
+    that matches 2+ headings raises instead of guessing — destructive writes must not
+    silently pick one. Raises ValueError listing available slugs when nothing matches.
     """
     target = _slug(heading_query)
     heads = _headings(content)
-    match = next((h for h in heads if h[2] and _slug(h[2]) == target), None)
-    if match is None:
-        match = next((h for h in heads if target and target in _slug(h[2])), None)
-    if match is None:
-        avail = ", ".join(_slug(h[2]) for h in heads) or "(no headings in this section)"
-        raise ValueError(
-            f"Heading {heading_query!r} not found. Available headings: {avail}"
+    exact = [h for h in heads if h[2] and _slug(h[2]) == target]
+    if exact:
+        if require_unique and len(exact) > 1:
+            raise ValueError(
+                f"Heading {heading_query!r} is ambiguous: {len(exact)} headings share "
+                f"slug {target!r}. Disambiguate, or use update_context for a full rewrite."
+            )
+        match = exact[0]
+    else:
+        match = None if exact_only else next(
+            (h for h in heads if target and target in _slug(h[2])), None
         )
-    start, level, _ = match
-    end = next((i for (i, lvl, _) in heads if i > start and lvl <= level), None)
-    lines = content.splitlines()
-    return "\n".join(lines[start:end]).strip()
+        if match is None:
+            avail = ", ".join(_slug(h[2]) for h in heads) or "(no headings in this section)"
+            raise ValueError(
+                f"Heading {heading_query!r} not found. Available headings: {avail}"
+            )
+    start, level, text = match
+    end = next(
+        (i for (i, lvl, _) in heads if i > start and lvl <= level),
+        len(content.splitlines()),
+    )
+    return start, end, level, text
+
+
+def _slice_section(content: str, heading_query: str) -> str:
+    """Return the subsection text under the heading matching `heading_query`."""
+    start, end, _, _ = _locate_section(content, heading_query)
+    return "\n".join(content.splitlines()[start:end]).strip()
 
 
 def _build_manifest(sections: dict[str, str]) -> str:
@@ -255,6 +283,60 @@ def append_to_context(name: str, content: str, separator: str = "\n\n") -> str:
     s3_client.put_object(Bucket=bucket, Key=f"{name}.md", Body=merged.encode("utf-8"))
     _cache.pop(f"{name}.md", None)
     return f"Appended {len(content)} chars to {name}.md"
+
+
+@mcp.tool()
+def update_subsection(name: str, heading: str, content: str) -> str:
+    """
+    Replace a single subsection of a portfolio file in place, addressed by heading.
+
+    This is the write counterpart to get_personal_context("<name>#<heading>"): it
+    rewrites only the slice under the matched heading and leaves the rest of the file
+    untouched — no need to read, regenerate, and rewrite the whole file.
+
+    Args:
+        name: Section name without .md (one of the valid portfolio files).
+        heading: The heading identifying the subsection — its slug or heading text,
+            the same address used by get_personal_context("name#heading"). Must match
+            exactly one heading (slug equality, no substring); an unknown or ambiguous
+            heading raises with the available slugs.
+        content: The full replacement for that subsection, INCLUDING its heading line.
+            The first non-blank line must be a heading whose level and slug match the
+            target — this guards against silently dropping, renaming, or re-leveling
+            the heading (which would change its address). To rename or restructure,
+            use update_context for a full-file rewrite.
+
+    Inter-section spacing is normalized to a single blank line and line endings to LF.
+    """
+    if name not in PORTFOLIO_FILES:
+        raise ValueError(
+            f"Unknown context file: {name!r}. Valid names: {', '.join(PORTFOLIO_FILES)}"
+        )
+    if not content.strip():
+        raise ValueError("content must be non-empty")
+    bucket = os.environ["S3_BUCKET"]
+    existing = s3_client.get_object(Bucket=bucket, Key=f"{name}.md")["Body"].read().decode("utf-8")
+    start, end, level, text = _locate_section(
+        existing, heading, exact_only=True, require_unique=True
+    )
+
+    new_block = content.strip("\n")
+    first = next((ln for ln in new_block.splitlines() if ln.strip()), "")
+    m = _HEADING_RE.match(first)
+    if not m or len(m.group(1)) != level or _slug(m.group(2)) != _slug(text):
+        raise ValueError(
+            f"Replacement for {name}#{_slug(text)} must begin with the heading "
+            f"{'#' * level} {text!r} (matching level and slug); got {first!r}. "
+            f"Use update_context to rename or restructure."
+        )
+
+    lines = existing.splitlines()
+    before = "\n".join(lines[:start]).rstrip("\n")
+    after = "\n".join(lines[end:]).lstrip("\n")
+    merged = "\n\n".join(p for p in (before, new_block, after) if p).rstrip("\n") + "\n"
+    s3_client.put_object(Bucket=bucket, Key=f"{name}.md", Body=merged.encode("utf-8"))
+    _cache.pop(f"{name}.md", None)
+    return f"Replaced {name}#{_slug(text)} ({len(content)} chars)"
 
 
 async def _reject_get_sse(scope, receive, send):

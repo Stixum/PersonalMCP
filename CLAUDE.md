@@ -3,9 +3,12 @@
 ## What This Is
 
 Personal MCP server. Exposes personal context to any MCP client (Claude Desktop,
-Claude Code, claude.ai) via three tools backed by 10 markdown portfolio files in S3:
-`get_personal_context(section)`, `update_context(name, content)` (full-file replace),
-and `append_to_context(name, content)` (incremental append).
+Claude Code, claude.ai) via four tools backed by 10 markdown portfolio files in S3:
+`get_personal_context(section)` (whole file, `section#heading` subsection, or a
+no-arg index), `update_context(name, content)` (full-file replace),
+`append_to_context(name, content)` (incremental append), and
+`update_subsection(name, heading, content)` (heading-addressed in-place replace —
+the write mirror of `get_personal_context("name#heading")`).
 
 ## Stack
 
