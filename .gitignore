@@ -17,4 +17,8 @@ backups/
 placeholder/
 
 # Design plans/specs may inline personal data — keep local only
+# (docs/*.md is committed and public — keep it free of personal content)
 docs/superpowers/
+
+# macOS
+.DS_Store

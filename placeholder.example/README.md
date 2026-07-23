@@ -4,6 +4,10 @@ These are **generic templates** showing the shape and intended content of each
 of the 10 personal-context files this MCP server exposes. They contain **no
 personal data** — they're safe to commit and share.
 
+> For the heading-level outline of a real working portfolio — structure only,
+> content removed — plus the routing rules for deciding which file a new fact
+> belongs in, see [`docs/context-model.md`](../docs/context-model.md).
+
 ## How this directory relates to `placeholder/`
 
 | Directory | Tracked? | Contents |
@@ -25,6 +29,11 @@ $EDITOR placeholder/identity.md
 # 3. Sync to your S3 bucket (the live source the Lambda reads from)
 aws s3 sync placeholder/ s3://<your-bucket>/
 ```
+
+Step 3 is safe **only on first setup**. Once clients start writing through the
+MCP tools, S3 leads and `placeholder/` trails — pull down before editing
+locally, and use `--dryrun` before ever pushing up. See
+[`docs/setup.md`](../docs/setup.md#keeping-local-copies-in-sync).
 
 ## File purposes
 
