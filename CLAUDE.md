@@ -51,7 +51,7 @@ python -m pytest tests/ -v
 
 Requires `python3.13` on PATH. Install via `brew install python@3.13` if missing.
 
-`deploy.sh` does five things in order: build arm64 zip → update `$LATEST` code → publish a new version → wait for the SnapStart snapshot to optimize → re-point alias `live` at the new version. The Function URL targets the alias, so the URL itself does not change across deploys — only an alias swap. **Do not** invoke `aws lambda update-function-code` directly; the alias would still point at the previous version.
+`deploy.sh` does six things in order: build arm64 zip → update `$LATEST` code → publish a new version → wait for the SnapStart snapshot to optimize → re-point alias `live` at the new version → once the URL answers 401, delete old versions, keeping the new one, the previous `live` target (rollback) and any alias target. SnapStart bills a cached snapshot per published version (~$1/mo each), so without the prune they pile up. If the URL check fails, nothing is pruned. The Function URL targets the alias, so the URL itself does not change across deploys — only an alias swap. **Do not** invoke `aws lambda update-function-code` directly; the alias would still point at the previous version.
 
 ## Updating Portfolio Content (no redeploy needed)
 
