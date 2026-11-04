@@ -44,7 +44,8 @@ this, the second request to any warm container fails.
 
 `BearerAuthMiddleware` (see [auth.py](../auth.py)) wraps everything. It compares the
 `Authorization: Bearer` value against `MCP_BEARER_TOKEN` using `hmac.compare_digest`, and
-returns 401 before any MCP machinery runs.
+returns 401 before any MCP machinery runs. Only the ASGI `lifespan` scope skips this check.
+Every other non-HTTP scope, such as a WebSocket, is refused even with a valid token.
 
 Known and accepted properties of this model, for a single-operator server:
 
@@ -102,8 +103,11 @@ Three choices, in order of impact:
 The SnapStart constraint drives the whole deploy sequence:
 
 ```
-build zip → update $LATEST → publish version N → wait for snapshot → point alias live → N
+build zip → update $LATEST → publish version N → wait for N to be Active → point alias live → N
 ```
+
+If version N doesn't reach `Active` (it fails, or times out after about 5 minutes), the script
+exits non-zero with the reason and leaves the alias alone, so the live version is unchanged.
 
 `update-function-code` alone changes `$LATEST` only. The Function URL targets the alias,
 so **the URL keeps serving the previous snapshot** until the alias moves. Always deploy
@@ -112,7 +116,9 @@ via [`deploy.sh`](../deploy.sh), never with a bare `update-function-code`.
 `deploy.sh` then polls the live URL with an unauthenticated POST until it gets a 401 —
 proof that the new version's auth middleware is serving, since alias routing takes 10–15
 seconds to propagate. A 504 during that window means it's still routing to a container
-that isn't up yet.
+that isn't up yet. If it never gets a 401, the script exits non-zero, prunes nothing and
+prints the command to roll back. The alias has already moved at that point, so a failed
+check means the bad version may be live until you run it.
 
 ---
 

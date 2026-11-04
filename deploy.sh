@@ -45,18 +45,31 @@ VERSION=$(aws lambda publish-version \
   --query 'Version' --output text)
 echo "  published version: ${VERSION}"
 
-echo "→ Waiting for SnapStart optimization on version ${VERSION}..."
-for i in $(seq 1 20); do
-  STATUS=$(aws lambda get-function-configuration \
+# Wait on State, not SnapStart.OptimizationStatus: that reads "On" while the version
+# is still Pending, and even after it has Failed. Pointing the alias at a version
+# that isn't Active takes the URL down (504) for every client.
+echo "→ Waiting for version ${VERSION} to be Active (SnapStart snapshot)..."
+STATE=""
+for i in $(seq 1 60); do
+  STATE=$(aws lambda get-function-configuration \
     --function-name "${FUNCTION_NAME}" --qualifier "${VERSION}" \
-    --query 'SnapStart.OptimizationStatus' --output text)
-  if [ "${STATUS}" = "On" ]; then
-    echo "  snapshot ready"
+    --query 'State' --output text)
+  if [ "${STATE}" = "Active" ] || [ "${STATE}" = "Failed" ]; then
     break
   fi
-  echo "  attempt ${i}: ${STATUS}"
-  sleep 6
+  echo "  attempt ${i}: ${STATE}"
+  sleep 5
 done
+
+if [ "${STATE}" != "Active" ]; then
+  REASON=$(aws lambda get-function-configuration \
+    --function-name "${FUNCTION_NAME}" --qualifier "${VERSION}" \
+    --query 'StateReason' --output text)
+  echo "✗ Version ${VERSION} is ${STATE}, not Active: ${REASON}" >&2
+  echo "  Alias '${ALIAS_NAME}' was not moved, so the live version is unchanged." >&2
+  exit 1
+fi
+echo "  version ${VERSION} is Active"
 
 # Remember where the alias pointed before the swap — that is the rollback target
 # the prune step below keeps.
@@ -82,7 +95,7 @@ echo "→ Verifying URL routing to v${VERSION} (${URL}mcp)..."
 LIVE_OK=0
 for i in $(seq 1 12); do
   CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${URL}mcp" \
-    -H 'Content-Type: application/json' -d '{}' --max-time 10)
+    -H 'Content-Type: application/json' -d '{}' --max-time 10) || true
   if [ "${CODE}" = "401" ]; then
     echo "  ✓ live (HTTP 401 from auth middleware)"
     LIVE_OK=1
@@ -117,7 +130,10 @@ if [ "${LIVE_OK}" = "1" ]; then
     echo "  deleted v${v}"
   done
 else
-  echo "⚠ URL check did not pass — skipping version prune so v${PREV_VERSION} stays available for rollback"
+  echo "✗ URL check failed: alias '${ALIAS_NAME}' is on v${VERSION}, but the URL never answered 401." >&2
+  echo "  No versions were pruned. To roll back to v${PREV_VERSION}:" >&2
+  echo "  aws lambda update-alias --function-name ${FUNCTION_NAME} --name ${ALIAS_NAME} --function-version ${PREV_VERSION}" >&2
+  exit 1
 fi
 
 echo "✓ Deployed: ${FUNCTION_NAME} (alias ${ALIAS_NAME} → v${VERSION})"

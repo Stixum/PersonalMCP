@@ -99,8 +99,10 @@ aws lambda create-function-url-config \
 ```
 
 Requires `AWS_PROFILE` to be set. The script builds an arm64 zip, updates `$LATEST`,
-publishes a version, waits for the SnapStart snapshot, re-points `live`, and then polls
-the URL until it returns 401 — proof the new version is serving.
+publishes a version, waits for it to be `Active`, re-points `live`, and then polls the URL
+until it returns 401 — proof the new version is serving. It exits non-zero if the version
+never becomes `Active` (`live` isn't moved) or the URL check fails (it prints the rollback
+command).
 
 **Never run `aws lambda update-function-code` on its own.** It changes `$LATEST` only; the
 URL targets the alias, so the deploy appears to succeed while the old version keeps
