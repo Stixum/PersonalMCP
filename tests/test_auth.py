@@ -108,3 +108,64 @@ async def test_non_ascii_configured_token_accepts_exact_match(protected_app):
                 "/", headers={"Authorization": "Bearer tökén".encode("utf-8")}
             )
     assert response.status_code == 200
+
+
+def _scope_probe():
+    """Middleware wrapping an inner app that records whether it was reached."""
+    from auth import BearerAuthMiddleware
+
+    reached = []
+
+    async def inner(scope, receive, send):
+        reached.append(scope["type"])
+
+    return BearerAuthMiddleware(inner), reached
+
+
+async def _receive():
+    return {}
+
+
+@pytest.mark.asyncio
+async def test_lifespan_scope_passes_through():
+    """Lifespan carries no credentials and FastMCP needs it to start its task group."""
+    middleware, reached = _scope_probe()
+    await middleware({"type": "lifespan"}, _receive, None)
+    assert reached == ["lifespan"]
+
+
+@pytest.mark.asyncio
+async def test_websocket_scope_is_closed_without_reaching_app(caplog):
+    """Non-HTTP transports are unsupported, so even a valid token must not get through."""
+    middleware, reached = _scope_probe()
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "websocket",
+        "headers": [(b"authorization", b"Bearer correct-token")],
+    }
+    with patch.dict(os.environ, {"MCP_BEARER_TOKEN": "correct-token"}):
+        with caplog.at_level("WARNING", logger="auth"):
+            await middleware(scope, _receive, send)
+    assert reached == []
+    assert sent == [{"type": "websocket.close", "code": 1008}]
+    assert "auth_failure reason=unsupported_scope" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_unknown_scope_does_not_reach_app(caplog):
+    """A scope type this middleware doesn't know about is refused, not passed along."""
+    middleware, reached = _scope_probe()
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+
+    with caplog.at_level("WARNING", logger="auth"):
+        await middleware({"type": "made-up-protocol"}, _receive, send)
+    assert reached == []
+    assert sent == []
+    assert "auth_failure reason=unsupported_scope" in caplog.text

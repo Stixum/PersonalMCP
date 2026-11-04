@@ -12,15 +12,23 @@ class BearerAuthMiddleware:
     Token is read from the MCP_BEARER_TOKEN environment variable.
     Uses constant-time comparison (hmac.compare_digest) to prevent timing attacks.
     Returns 401 immediately if the token is missing, wrong scheme, or incorrect.
+    Only lifespan passes through unauthenticated; other non-HTTP scopes are refused.
     """
 
     def __init__(self, app):
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":
-            # Pass through lifespan, websocket, and other non-HTTP events
+        if scope["type"] == "lifespan":
+            # Carries no client request; FastMCP needs it to start its task group
             await self.app(scope, receive, send)
+            return
+
+        if scope["type"] != "http":
+            # Tokens are only checked on HTTP, so anything else must not reach the app
+            logger.warning("auth_failure reason=unsupported_scope type=%s", scope["type"])
+            if scope["type"] == "websocket":
+                await send({"type": "websocket.close", "code": 1008})
             return
 
         expected = os.environ.get("MCP_BEARER_TOKEN", "")
