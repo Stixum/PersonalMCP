@@ -1,12 +1,12 @@
-# Exact versions from the last known-good Lambda build. deploy.sh installs from this
-# file, so an unpinned package ships whatever is newest (mcp 2.x removed FastMCP).
+# Exact versions of the full arm64 closure. deploy.sh installs from this file, so an
+# unpinned package ships whatever is newest (mcp 2.x removed FastMCP).
 annotated_types==0.7.0
-anyio==4.13.0
+anyio==4.14.2
 attrs==26.1.0
-certifi==2026.5.20
+certifi==2026.10.23
 cffi==2.0.0
 click==8.4.1
-cryptography==49.0.0
+cryptography==50.0.2
 h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
@@ -15,12 +15,12 @@ idna==3.18
 jsonschema==4.26.0
 jsonschema_specifications==2025.9.1
 mangum==0.21.0
-mcp==1.27.2
+mcp==1.30.0
 pycparser==3.0
 pydantic==2.13.4
 pydantic_core==2.46.4
-pydantic_settings==2.14.1
-pyjwt==2.13.0
+pydantic_settings==2.14.2
+pyjwt==2.15.1
 python_dotenv==1.2.2
 python_multipart==0.0.32
 referencing==0.37.0
