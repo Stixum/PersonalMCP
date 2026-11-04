@@ -30,20 +30,20 @@ class BearerAuthMiddleware:
         # faster than requests with a wrong token (timing side-channel). This is an
         # accepted tradeoff for a personal server — constant-time rejection of all paths
         # would require always calling compare_digest with dummy values.
-        if not expected or not token or not hmac.compare_digest(token, expected):
+        if not expected or not token or not hmac.compare_digest(token, expected.encode("utf-8")):
             logger.warning("auth_failure reason=%s", "missing_token" if not token else "invalid_token")
             await self._reject_401(send)
             return
 
         await self.app(scope, receive, send)
 
-    def _extract_bearer_token(self, scope) -> str:
-        """Extract the token value from Authorization: Bearer <token> header."""
+    def _extract_bearer_token(self, scope) -> bytes:
+        """Extract the raw token bytes from Authorization: Bearer <token> header."""
         headers = dict(scope.get("headers", []))
-        auth = headers.get(b"authorization", b"").decode("utf-8")
-        if auth.startswith("Bearer "):
-            return auth[len("Bearer "):]
-        return ""
+        auth = headers.get(b"authorization", b"")
+        if auth.startswith(b"Bearer "):
+            return auth[len(b"Bearer "):]
+        return b""
 
     async def _reject_401(self, send):
         await send({
