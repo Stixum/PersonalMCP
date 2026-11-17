@@ -90,6 +90,21 @@ aws lambda create-function-url-config \
   --auth-type NONE --invoke-mode BUFFERED
 ```
 
+A public URL needs two resource-policy grants on the alias: `lambda:InvokeFunctionUrl`
+and `lambda:InvokeFunction`. Scope the second to calls that come through the URL. Without
+`--invoked-via-function-url`, any AWS account can call the Invoke API directly with an
+event it wrote and skip the URL entirely. `deploy.sh` refuses to deploy over such a grant,
+and adds the conditioned one if it is missing.
+
+```bash
+aws lambda add-permission --function-name personal-mcp-server --qualifier live \
+  --statement-id FunctionURLAllowPublicAccess --action lambda:InvokeFunctionUrl \
+  --principal '*' --function-url-auth-type NONE
+aws lambda add-permission --function-name personal-mcp-server --qualifier live \
+  --statement-id FunctionURLAllowInvokeAction --action lambda:InvokeFunction \
+  --principal '*' --invoked-via-function-url
+```
+
 ---
 
 ## 5. Deploy

@@ -18,6 +18,8 @@ REPO = Path(__file__).resolve().parent.parent
 FAKE_AWS = r"""#!/bin/bash
 echo "aws $*" >> "$CALL_LOG"
 case "$*" in
+  *"get-policy"*)
+    echo "$FAKE_POLICY" ;;
   *"get-function-configuration"*"StateReason"*)
     echo "$FAKE_STATE_REASON" ;;
   *"get-function-configuration"*"State"*)
@@ -36,6 +38,21 @@ case "$*" in
   *) echo "ok" ;;
 esac
 """
+
+GOOD_POLICY = (
+    '{"Statement":[{"Sid":"FunctionURLAllowInvokeAction","Effect":"Allow","Principal":"*",'
+    '"Action":"lambda:InvokeFunction","Resource":"x",'
+    '"Condition":{"Bool":{"lambda:InvokedViaFunctionUrl":"true"}}}]}'
+)
+OPEN_POLICY = (
+    '{"Statement":[{"Sid":"AllowPublicInvoke","Effect":"Allow","Principal":"*",'
+    '"Action":"lambda:InvokeFunction","Resource":"x"}]}'
+)
+URL_ONLY_POLICY = (
+    '{"Statement":[{"Sid":"FunctionURLAllowPublicAccess","Effect":"Allow","Principal":"*",'
+    '"Action":"lambda:InvokeFunctionUrl","Resource":"x",'
+    '"Condition":{"StringEquals":{"lambda:FunctionUrlAuthType":"NONE"}}}]}'
+)
 
 FAKE_CURL = r"""#!/bin/bash
 echo "curl $*" >> "$CALL_LOG"
@@ -89,7 +106,7 @@ def run_deploy(tmp_path):
 
     call_log = tmp_path / "calls.log"
 
-    def run(states, http="401", reason="import failed: no module named x"):
+    def run(states, http="401", reason="import failed: no module named x", policy=GOOD_POLICY):
         env = {
             "PATH": path,
             "AWS_PROFILE": "fake-test-profile",
@@ -100,6 +117,7 @@ def run_deploy(tmp_path):
             "FAKE_STATES": ",".join(states),
             "FAKE_STATE_REASON": reason,
             "FAKE_HTTP": http,
+            "FAKE_POLICY": policy,
         }
         result = subprocess.run(
             ["/bin/bash", str(script)],
@@ -175,3 +193,29 @@ def test_published_version_state_is_read_with_expected_query(run_deploy):
     """Guards the fake against drift: the script must ask for State, not OptimizationStatus."""
     _, calls = run_deploy(["Active"])
     assert not _called(calls, "OptimizationStatus")
+
+
+def test_unconditioned_public_invoke_grant_blocks_deploy(run_deploy):
+    """Finding A1: Invoke for "*" without lambda:InvokedViaFunctionUrl bypasses the URL."""
+    result, calls = run_deploy(["Active"], policy=OPEN_POLICY)
+    assert result.returncode != 0
+    assert "AllowPublicInvoke" in result.stderr
+    assert not _called(calls, "update-function-code")
+    assert not _called(calls, "add-permission")
+
+
+def test_missing_invoke_grant_is_added_conditioned_on_function_and_alias(run_deploy):
+    result, calls = run_deploy(["Active"], policy=URL_ONLY_POLICY)
+    assert result.returncode == 0, result.stdout + result.stderr
+    adds = [c for c in calls if "add-permission" in c]
+    assert len(adds) == 2
+    assert all("--invoked-via-function-url" in c and "--action lambda:InvokeFunction" in c for c in adds)
+    assert sum("--qualifier live" in c for c in adds) == 1
+    assert _last_index_of(calls, "add-permission") < _index_of(calls, "update-function-code")
+
+
+def test_conditioned_invoke_grant_is_left_alone(run_deploy):
+    result, calls = run_deploy(["Active"])
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sum("get-policy" in c for c in calls) == 2
+    assert not _called(calls, "add-permission")
