@@ -12,6 +12,68 @@ AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 export AWS_PROFILE AWS_DEFAULT_REGION
 export PATH="/opt/homebrew/bin:/opt/homebrew/Cellar/python@3.13/3.13.13_1/bin:/usr/local/bin:$PATH"
 
+# Invoke grant for the Function URL. Since late 2025 a URL with auth type NONE needs
+# lambda:InvokeFunction for "*" as well as lambda:InvokeFunctionUrl. That grant must
+# carry lambda:InvokedViaFunctionUrl = true: without it any AWS account can call the
+# Invoke API directly with an event it wrote, bypassing the URL (finding A1,
+# 2026-11-17). Checked on the function and on the alias the URL targets, before
+# anything is built or changed.
+invoke_grant_state() {
+  # Prints "open" (an unconditioned public Invoke grant), "ok" or "missing".
+  python3 -c '
+import json, sys
+try:
+    stmts = json.loads(sys.argv[1]).get("Statement", [])
+except ValueError:
+    stmts = []
+def public(s):
+    p = s.get("Principal")
+    return p == "*" or (isinstance(p, dict) and p.get("AWS") in ("*", ["*"]))
+def invokes(s):
+    a = s.get("Action")
+    a = [a] if isinstance(a, str) else (a or [])
+    return any(x in ("lambda:InvokeFunction", "lambda:*", "*") for x in a)
+grants = [s for s in stmts if s.get("Effect") == "Allow" and public(s) and invokes(s)]
+via_url = lambda s: str(s.get("Condition", {}).get("Bool", {}).get("lambda:InvokedViaFunctionUrl", "")).lower() == "true"
+if any(not s.get("Condition") for s in grants):
+    print("open")
+elif any(via_url(s) for s in grants):
+    print("ok")
+else:
+    print("missing")
+' "$1"
+}
+
+ensure_invoke_grant() {
+  # Args: optional --qualifier <alias>
+  local where="${FUNCTION_NAME}${2:+:$2}"
+  local policy state
+  policy=$(aws lambda get-policy --function-name "${FUNCTION_NAME}" "$@" \
+    --query Policy --output text 2>/dev/null || echo '{}')
+  state=$(invoke_grant_state "${policy}")
+  case "${state}" in
+    open)
+      echo "✗ ${where} grants lambda:InvokeFunction to \"*\" with no condition." >&2
+      echo "  Any AWS account can invoke it directly, bypassing the Function URL. Remove that" >&2
+      echo "  statement (aws lambda get-policy shows its Sid, e.g. AllowPublicInvoke):" >&2
+      echo "  aws lambda remove-permission --function-name ${FUNCTION_NAME} $* --statement-id <Sid>" >&2
+      echo "  Nothing was deployed." >&2
+      exit 1 ;;
+    missing)
+      aws lambda add-permission --function-name "${FUNCTION_NAME}" "$@" \
+        --statement-id FunctionURLAllowInvokeAction \
+        --action lambda:InvokeFunction --principal '*' \
+        --invoked-via-function-url --output text --query Statement >/dev/null
+      echo "  added conditioned Invoke grant on ${where}" ;;
+    *)
+      echo "  ✓ ${where}: Invoke only via the Function URL" ;;
+  esac
+}
+
+echo "→ Checking Function URL invoke grants..."
+ensure_invoke_grant
+ensure_invoke_grant --qualifier "${ALIAS_NAME}"
+
 echo "→ Cleaning previous build..."
 rm -rf package/ function.zip
 
